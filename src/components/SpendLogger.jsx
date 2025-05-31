@@ -24,9 +24,11 @@ function displayCategoryName(id) {
     healthcare: "🏥",
     education: "📚",
     other: "🤷",
+    // You might want to add more icons for common custom categories
+    // or a default icon for new custom ones not in this list
   };
   const normalizedId = normalizeCategoryName(id);
-  const icon = icons[normalizedId] || "";
+  const icon = icons[normalizedId] || ""; // Fallback for new categories
   return `${icon} ${id
     .replace(/_/g, " ")
     .replace(/\b\w/g, (l) => l.toUpperCase())}`.trim();
@@ -52,7 +54,10 @@ export default function SpendLogger() {
   const [recentEntriesGrouped, setRecentEntriesGrouped] = useState({});
   const amountInputRef = useRef(null);
 
-  // Removed dark mode state and useEffect, as per request
+  // New states for "Other" category functionality
+  const [showNewCategoryInput, setShowNewCategoryInput] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const newCategoryInputRef = useRef(null); // Ref for the new category input field
 
   // Initialize gapi and gis libraries
   useEffect(() => {
@@ -119,11 +124,13 @@ export default function SpendLogger() {
       setRecentEntriesGrouped({});
       setCategories([]); // Clear categories on sign out
       setCategory("");
+      setNewCategoryName(""); // Clear new category name
+      setShowNewCategoryInput(false); // Hide new category input
     }
   };
 
   const loadAndRenderSummary = async () => {
-    if (!isSignedIn) return; // Only load if signed in
+    if (!isSignedIn) return;
 
     try {
       const res = await gapi.client.sheets.spreadsheets.values.get({
@@ -146,7 +153,7 @@ export default function SpendLogger() {
         const amt = parseFloat(entryAmount);
         if (isNaN(amt)) return;
 
-        uniqueCategories.add(entryCategory);
+        uniqueCategories.add(entryCategory); // Add all existing categories
 
         if (entryDate.startsWith(currentMonth)) {
           if (!summaryData[entryCategory]) summaryData[entryCategory] = 0;
@@ -190,13 +197,23 @@ export default function SpendLogger() {
       setStatus("Please sign in to add an expense.");
       return;
     }
-    if (
-      !category ||
-      !amount ||
-      isNaN(parseFloat(amount)) ||
-      parseFloat(amount) <= 0
-    ) {
-      setStatus("Please select a category and enter a valid amount.");
+
+    let finalCategory = category; // Default to selected category
+    if (showNewCategoryInput) {
+      // If "Other" was selected and new input is visible
+      if (!newCategoryName.trim()) {
+        setStatus("Please enter a new category name.");
+        return;
+      }
+      finalCategory = newCategoryName.trim(); // Use the new category name
+    } else if (!category) {
+      // If no category (and not "Other") is selected
+      setStatus("Please select a category.");
+      return;
+    }
+
+    if (isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+      setStatus("Please enter a valid amount.");
       return;
     }
 
@@ -207,13 +224,16 @@ export default function SpendLogger() {
         valueInputOption: "USER_ENTERED",
         insertDataOption: "INSERT_ROWS",
         resource: {
-          values: [[date, category, parseFloat(amount)]],
+          values: [[date, finalCategory, parseFloat(amount)]], // Use finalCategory
         },
       });
 
       setStatus("Expense added successfully!");
       setAmount("");
-      loadAndRenderSummary();
+      setNewCategoryName(""); // Clear new category name after submission
+      setShowNewCategoryInput(false); // Hide the input after submission
+      setCategory(""); // Reset category dropdown
+      loadAndRenderSummary(); // Refresh summary and categories
     } catch (err) {
       console.error(err);
       setStatus("Failed to save entry. Check permissions or network.");
@@ -221,9 +241,24 @@ export default function SpendLogger() {
   };
 
   const handleCategoryChange = (e) => {
-    setCategory(e.target.value);
-    if (amountInputRef.current) {
-      amountInputRef.current.focus();
+    const selectedCat = e.target.value;
+    setCategory(selectedCat); // Update the main category state
+
+    if (selectedCat === "Other") {
+      setShowNewCategoryInput(true);
+      setNewCategoryName(""); // Clear any previous input for the new category
+      // Use a timeout to ensure the new input field is rendered before attempting to focus it
+      setTimeout(() => {
+        if (newCategoryInputRef.current) {
+          newCategoryInputRef.current.focus();
+        }
+      }, 0);
+    } else {
+      setShowNewCategoryInput(false);
+      setNewCategoryName(""); // Clear and hide if another category is selected
+      if (amountInputRef.current) {
+        amountInputRef.current.focus(); // Focus amount if not "Other"
+      }
     }
   };
 
@@ -233,23 +268,18 @@ export default function SpendLogger() {
   });
 
   return (
-    // The main container retains dark mode classes as the default theme
     <div className="min-h-screen p-4 font-sans text-base sm:text-lg bg-gray-900 text-gray-100 transition-colors duration-300">
-      {/* Top Bar */}
       <header className="flex flex-col sm:flex-row justify-between items-center mb-6 space-y-4 sm:space-y-0">
         <h1 className="text-3xl sm:text-4xl font-bold text-center sm:text-left">
           Daily Expense Tracker
         </h1>
-        <div className="flex items-center justify-between space-x-4 w-full sm:w-auto">
-          {/* Total amount for the current month */}
+        <div className="flex items-center justify-between space-x-4 w-full">
           {isSignedIn && summary && (
-            <div className="flex items-center space-x-2 text-lg font-semibold text-indigo-400 ">
+            <div className="flex items-center space-x-2 text-lg font-semibold text-indigo-400">
               {/* <span>This Month:</span> */}
               <span>₹{summary.total.toFixed(2)}</span>
             </div>
           )}
-
-          {/* Sign In/Out Button */}
           {!isSignedIn ? (
             <button
               className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition duration-300 text-sm sm:text-base"
@@ -269,7 +299,6 @@ export default function SpendLogger() {
       </header>
 
       <main className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {/* Log Expense Card */}
         <section className="card p-6 col-span-1 md:col-span-1 bg-gray-800 shadow-md rounded-xl">
           <h2 className="text-2xl font-semibold mb-4 text-gray-100">
             Log New Expense
@@ -303,6 +332,8 @@ export default function SpendLogger() {
                       {displayCategoryName(cat)}
                     </option>
                   ))}
+                  {/* Always include the "Other" option */}
+                  <option value="Other">➕ Other (Add New)</option>
                 </select>
                 <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-300">
                   <svg
@@ -320,6 +351,28 @@ export default function SpendLogger() {
                 </div>
               </div>
             </div>
+            {/* New: Conditional input for new category name */}
+            {showNewCategoryInput && (
+              <div>
+                <label
+                  htmlFor="newCategory"
+                  className="block text-sm font-medium mb-1 text-gray-300"
+                >
+                  New Category Name
+                </label>
+                <input
+                  type="text"
+                  id="newCategory"
+                  name="newCategory"
+                  ref={newCategoryInputRef}
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  placeholder="e.g., Books, Gym, Software"
+                  className="block w-full px-4 py-2 border border-gray-600 rounded-md focus:ring-indigo-500 focus:border-indigo-500 bg-gray-700 text-gray-100 transition duration-300 text-base"
+                  disabled={!isSignedIn}
+                />
+              </div>
+            )}
             <div>
               <label
                 htmlFor="amount"
@@ -371,7 +424,6 @@ export default function SpendLogger() {
           )}
         </section>
 
-        {/* Monthly Summary Card */}
         <section className="card p-6 col-span-1 md:col-span-1 lg:col-span-2 bg-gray-800 shadow-md rounded-xl">
           <h2 className="text-2xl font-semibold mb-4 text-gray-100">
             Monthly Summary ({currentMonthName})
@@ -407,7 +459,6 @@ export default function SpendLogger() {
           )}
         </section>
 
-        {/* Recent Entries Log Card */}
         <section className="card p-6 col-span-1 lg:col-span-3 bg-gray-800 shadow-md rounded-xl">
           <h2 className="text-2xl font-semibold mb-4 text-gray-100">
             Recent Entries
@@ -449,7 +500,6 @@ export default function SpendLogger() {
           )}
         </section>
       </main>
-      {/* Removed the style jsx block as the toggle switch is removed */}
     </div>
   );
 }
