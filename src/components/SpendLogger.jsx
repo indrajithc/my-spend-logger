@@ -118,14 +118,14 @@ export default function SpendLogger() {
         spreadsheetId: SPREADSHEET_ID,
         range: "Sheet1!A:C",
       });
-
+  
       const rows = res.result.values || [];
       const currentMonth = new Date().toISOString().slice(0, 7);
       const summaryData = {};
       let total = 0;
-
+  
       const entries = [];
-
+  
       rows.forEach(([entryDate, entryCategory, entryAmount]) => {
         if (!entryDate || !entryAmount) return;
         const cat = normalizeCategoryName(entryCategory);
@@ -135,23 +135,28 @@ export default function SpendLogger() {
           summaryData[cat] += amt;
           total += amt;
         }
-
+  
         entries.push({
           date: entryDate,
           category: entryCategory,
           amount: amt,
         });
       });
-
+  
       setSummary({ total, breakdown: summaryData });
-      setRecentEntriesGrouped(groupByDate(entries.reverse().slice(0, 50)));
+  
+      const grouped = groupByDate(entries);
+      const sortedGrouped = Object.fromEntries(
+        Object.entries(grouped).sort(([a], [b]) => new Date(b) - new Date(a))
+      );
+      setRecentEntriesGrouped(sortedGrouped);
     } catch (err) {
       console.error("Error loading summary:", err);
       setSummary(null);
       setRecentEntriesGrouped({});
     }
   };
-
+  
   const handleSubmit = async (e) => {
     e.preventDefault();
     const selectedCategory =
