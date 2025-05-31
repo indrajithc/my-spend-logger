@@ -47,20 +47,24 @@ export default function SpendLogger() {
   const [categories, setCategories] = useState([]);
   const [category, setCategory] = useState("");
   const [amount, setAmount] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10)); // YYYY-MM-DD for input type="date"
   const [status, setStatus] = useState("");
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [summary, setSummary] = useState(null);
   const [recentEntriesGrouped, setRecentEntriesGrouped] = useState({});
   const amountInputRef = useRef(null);
 
-  // New states for "Other" category functionality
+  // States for "Other" category functionality
   const [showNewCategoryInput, setShowNewCategoryInput] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const newCategoryInputRef = useRef(null); // Ref for the new category input field
 
+  // New loading state
+  const [isLoading, setIsLoading] = useState(true); // Start as loading
+
   // Initialize gapi and gis libraries
   useEffect(() => {
+    setIsLoading(true); // Start loading for API initialization
     function gapiLoaded() {
       gapi.load("client", async () => {
         await gapi.client.init({
@@ -74,6 +78,8 @@ export default function SpendLogger() {
           gapi.client.setToken(JSON.parse(savedToken));
           setIsSignedIn(true);
           loadAndRenderSummary();
+        } else {
+          setIsLoading(false); // If no saved token, stop loading here.
         }
       });
     }
@@ -82,16 +88,26 @@ export default function SpendLogger() {
       const client = window.google.accounts.oauth2.initTokenClient({
         client_id: CLIENT_ID,
         scope: SCOPES,
-        callback: (resp) => {
-          if (resp.error) return;
+        callback: async (resp) => {
+          // Made callback async
+          if (resp.error) {
+            setIsLoading(false); // Stop loading on error
+            return;
+          }
           const token = gapi.client.getToken();
           localStorage.setItem("gapi_token", JSON.stringify(token));
           setIsSignedIn(true);
           setStatus("Signed in!");
-          loadAndRenderSummary();
+          await loadAndRenderSummary(); // Ensure summary loads after sign-in
+          setIsLoading(false); // Stop loading after successful sign-in and data load
         },
       });
       setTokenClient(client);
+      // If gapi was already loaded and signed in, gisLoaded might not trigger a new token.
+      // So, if already signed in, and gapi is loaded, we can stop loading.
+      if (gapi.client && isSignedIn) {
+        setIsLoading(false);
+      }
     }
 
     gapiLoaded();
@@ -106,13 +122,22 @@ export default function SpendLogger() {
     script2.src = "https://accounts.google.com/gsi/client";
     script2.onload = gisLoaded;
     document.body.appendChild(script2);
+
+    // Cleanup function to remove scripts if component unmounts
+    return () => {
+      document.body.removeChild(script1);
+      document.body.removeChild(script2);
+      delete window.gisLoaded;
+    };
   }, []);
 
   const handleAuth = () => {
+    setIsLoading(true); // Start loading when attempting to sign in
     if (tokenClient) tokenClient.requestAccessToken();
   };
 
   const handleSignOut = () => {
+    setIsLoading(true); // Start loading when signing out
     const token = gapi.client.getToken();
     if (token) {
       window.google.accounts.oauth2.revoke(token.access_token);
@@ -127,11 +152,15 @@ export default function SpendLogger() {
       setNewCategoryName(""); // Clear new category name
       setShowNewCategoryInput(false); // Hide new category input
     }
+    setIsLoading(false); // Stop loading after sign out
   };
 
   const loadAndRenderSummary = async () => {
-    if (!isSignedIn) return;
-
+    if (!isSignedIn) {
+      setIsLoading(false); // No need to load if not signed in
+      return;
+    }
+    setIsLoading(true); // Start loading data
     try {
       const res = await gapi.client.sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
@@ -177,24 +206,36 @@ export default function SpendLogger() {
         Object.entries(grouped).sort(([a], [b]) => new Date(b) - new Date(a))
       );
       setRecentEntriesGrouped(sortedGrouped);
+      setStatus("Data loaded successfully.");
     } catch (err) {
       console.error("Error loading summary:", err);
       setStatus("Failed to load data. Please sign in again.");
       setSummary(null);
       setRecentEntriesGrouped({});
+    } finally {
+      setIsLoading(false); // Always stop loading, regardless of success or error
     }
   };
 
   useEffect(() => {
-    if (isSignedIn) {
+    // This useEffect ensures loadAndRenderSummary is called once isSignedIn changes to true
+    // It's already handled by the gisLoaded callback for initial sign-in.
+    // This might primarily catch cases where isSignedIn changes without a full page load.
+    if (isSignedIn && !summary && !isLoading) {
+      // Only attempt to load if not already loading and summary is empty
       loadAndRenderSummary();
     }
-  }, [isSignedIn]);
+  }, [isSignedIn, summary, isLoading]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!isSignedIn) {
       setStatus("Please sign in to add an expense.");
+      return;
+    }
+    if (isLoading) {
+      // Prevent double submission
+      setStatus("Please wait, an operation is already in progress.");
       return;
     }
 
@@ -213,10 +254,11 @@ export default function SpendLogger() {
     }
 
     if (isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
-      setStatus("Please enter a valid amount.");
+      setStatus("Please enter a valid amount (e.g., 25.50).");
       return;
     }
 
+    setIsLoading(true); // Start loading for submission
     try {
       await gapi.client.sheets.spreadsheets.values.append({
         spreadsheetId: SPREADSHEET_ID,
@@ -233,10 +275,12 @@ export default function SpendLogger() {
       setNewCategoryName(""); // Clear new category name after submission
       setShowNewCategoryInput(false); // Hide the input after submission
       setCategory(""); // Reset category dropdown
-      loadAndRenderSummary(); // Refresh summary and categories
+      await loadAndRenderSummary(); // Refresh summary and categories after adding
     } catch (err) {
       console.error(err);
       setStatus("Failed to save entry. Check permissions or network.");
+    } finally {
+      setIsLoading(false); // Always stop loading, regardless of success or error
     }
   };
 
@@ -273,24 +317,31 @@ export default function SpendLogger() {
         <h1 className="text-3xl sm:text-4xl font-bold text-center sm:text-left">
           Daily Expense Tracker
         </h1>
-        <div className="flex items-center justify-between space-x-4 w-full">
-          {isSignedIn && summary && (
+        <div className="flex items-center justify-between space-x-4 w-full sm:w-auto">
+          {" "}
+          {/* Added w-full sm:w-auto for better alignment */}
+          {isLoading && (
+            <div className="text-indigo-400 text-lg">Loading...</div>
+          )}
+          {!isLoading && isSignedIn && summary && (
             <div className="flex items-center space-x-2 text-lg font-semibold text-indigo-400">
-              {/* <span>This Month:</span> */}
+              {/* Removed "This Month:" to keep it concise */}
               <span>₹{summary.total.toFixed(2)}</span>
             </div>
           )}
-          {!isSignedIn ? (
+          {!isLoading && !isSignedIn ? (
             <button
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition duration-300 text-sm sm:text-base"
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition duration-300 text-sm sm:text-base disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={handleAuth}
+              disabled={isLoading}
             >
               Sign In
             </button>
           ) : (
             <button
-              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition duration-300 text-sm sm:text-base"
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition duration-300 text-sm sm:text-base disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={handleSignOut}
+              disabled={isLoading}
             >
               Sign Out
             </button>
@@ -317,14 +368,16 @@ export default function SpendLogger() {
                   name="category"
                   value={category}
                   onChange={handleCategoryChange}
-                  className="block w-full px-4 py-2 border border-gray-600 rounded-md focus:ring-indigo-500 focus:border-indigo-500 appearance-none bg-gray-700 text-gray-100 transition duration-300 text-base"
-                  disabled={!isSignedIn || categories.length === 0}
+                  className="block w-full px-4 py-2 border border-gray-600 rounded-md focus:ring-indigo-500 focus:border-indigo-500 appearance-none bg-gray-700 text-gray-100 transition duration-300 text-base disabled:opacity-50"
+                  disabled={!isSignedIn || isLoading}
                 >
                   <option value="">
-                    {categories.length > 0
+                    {isLoading
+                      ? "Loading..."
+                      : categories.length > 0
                       ? "Select a category"
                       : isSignedIn
-                      ? "Loading categories..."
+                      ? "No categories found. Add one via 'Other'."
                       : "Sign in to load categories"}
                   </option>
                   {categories.map((cat) => (
@@ -332,7 +385,6 @@ export default function SpendLogger() {
                       {displayCategoryName(cat)}
                     </option>
                   ))}
-                  {/* Always include the "Other" option */}
                   <option value="Other">➕ Other (Add New)</option>
                 </select>
                 <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-300">
@@ -351,7 +403,6 @@ export default function SpendLogger() {
                 </div>
               </div>
             </div>
-            {/* New: Conditional input for new category name */}
             {showNewCategoryInput && (
               <div>
                 <label
@@ -368,8 +419,8 @@ export default function SpendLogger() {
                   value={newCategoryName}
                   onChange={(e) => setNewCategoryName(e.target.value)}
                   placeholder="e.g., Books, Gym, Software"
-                  className="block w-full px-4 py-2 border border-gray-600 rounded-md focus:ring-indigo-500 focus:border-indigo-500 bg-gray-700 text-gray-100 transition duration-300 text-base"
-                  disabled={!isSignedIn}
+                  className="block w-full px-4 py-2 border border-gray-600 rounded-md focus:ring-indigo-500 focus:border-indigo-500 bg-gray-700 text-gray-100 transition duration-300 text-base disabled:opacity-50"
+                  disabled={!isSignedIn || isLoading}
                 />
               </div>
             )}
@@ -388,8 +439,8 @@ export default function SpendLogger() {
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="e.g., 25.50"
-                className="block w-full px-4 py-2 border border-gray-600 rounded-md focus:ring-indigo-500 focus:border-indigo-500 bg-gray-700 text-gray-100 transition duration-300 text-base"
-                disabled={!isSignedIn}
+                className="block w-full px-4 py-3 text-2xl font-bold border border-gray-600 rounded-md focus:ring-indigo-500 focus:border-indigo-500 bg-gray-700 text-indigo-300 transition duration-300 disabled:opacity-50"
+                disabled={!isSignedIn || isLoading}
               />
             </div>
             <div>
@@ -405,16 +456,16 @@ export default function SpendLogger() {
                 name="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
-                className="block w-full px-4 py-2 border border-gray-600 rounded-md focus:ring-indigo-500 focus:border-indigo-500 bg-gray-700 text-gray-100 transition duration-300 text-base"
-                disabled={!isSignedIn}
+                className="block w-full px-4 py-2 border border-gray-600 rounded-md focus:ring-indigo-500 focus:border-indigo-500 bg-gray-700 text-gray-100 transition duration-300 text-base disabled:opacity-50"
+                disabled={!isSignedIn || isLoading}
               />
             </div>
             <button
               type="submit"
               className="w-full py-3 bg-indigo-600 text-white font-semibold rounded-md hover:bg-indigo-700 transition duration-300 text-lg disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={!isSignedIn}
+              disabled={!isSignedIn || isLoading}
             >
-              Add Expense
+              {isLoading ? "Saving..." : "Add Expense"}
             </button>
           </form>
           {status && (
@@ -428,7 +479,9 @@ export default function SpendLogger() {
           <h2 className="text-2xl font-semibold mb-4 text-gray-100">
             Monthly Summary ({currentMonthName})
           </h2>
-          {isSignedIn && summary ? (
+          {isLoading && !summary ? (
+            <p className="text-gray-400">Loading summary...</p>
+          ) : isSignedIn && summary ? (
             <>
               <div className="mb-4">
                 <p className="text-lg">
@@ -463,7 +516,9 @@ export default function SpendLogger() {
           <h2 className="text-2xl font-semibold mb-4 text-gray-100">
             Recent Entries
           </h2>
-          {isSignedIn && Object.keys(recentEntriesGrouped).length > 0 ? (
+          {isLoading && Object.keys(recentEntriesGrouped).length === 0 ? (
+            <p className="text-gray-400">Loading recent entries...</p>
+          ) : isSignedIn && Object.keys(recentEntriesGrouped).length > 0 ? (
             <div className="space-y-6">
               {Object.entries(recentEntriesGrouped).map(
                 ([dateKey, entries]) => (
