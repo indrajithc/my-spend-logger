@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html>
-
 <head>
   <meta charset="utf-8" />
   <title>My Spend Logger</title>
@@ -12,13 +11,11 @@
       padding: 1rem;
       background: #f5f5f5;
     }
-
     .category-icon {
       margin-right: 8px;
     }
   </style>
 </head>
-
 <body>
   <div class="container">
     <h2 class="mb-4 text-center">💸 My Spend Logger</h2>
@@ -35,14 +32,19 @@
       </div>
       <div class="mb-3">
         <label for="category" class="form-label">Category</label>
-        <select id="category" class="form-select">
-          <option>Food</option>
-          <option>Transport</option>
-          <option>Entertainment</option>
-          <option>Shopping</option>
-          <option>Bills</option>
-          <option>Other</option>
-        </select>
+        <div class="d-flex gap-2">
+          <select id="category" class="form-select flex-grow-1">
+            <option>Food</option>
+            <option>Transport</option>
+            <option>Entertainment</option>
+            <option>Shopping</option>
+            <option>Bills</option>
+            <option>Other</option>
+          </select>
+          <input type="text" id="newCategory" class="form-control" placeholder="New Category" />
+          <button type="button" id="addCategory" class="btn btn-secondary">+</button>
+        </div>
+        <div id="categoryError" class="text-danger small mt-1"></div>
       </div>
       <div class="mb-3">
         <label for="amount" class="form-label">Amount (Rs)</label>
@@ -62,7 +64,7 @@
     // Replace with your credentials 
     const CLIENT_ID = '531735313700-ohs976audr2cl3mttilf2f10580480e0.apps.googleusercontent.com';
     const API_KEY = 'AIzaSyCkJPL55u9pzOaYmGn-ic5QjqKgBe8o-RA';
-    const SPREADSHEET_ID = '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms';
+    const SPREADSHEET_ID = '1vU6VaHiKkgCwLb3h8ydLjPVZDoGaeQOxBBOygETFrdQ';
     const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
 
     let tokenClient;
@@ -72,6 +74,10 @@
     const authorizeButton = document.getElementById('authorize_button');
     const signoutButton = document.getElementById('signout_button');
     const statusEl = document.getElementById('status');
+    const categorySelect = document.getElementById('category');
+    const newCategoryInput = document.getElementById('newCategory');
+    const addCategoryButton = document.getElementById('addCategory');
+    const categoryError = document.getElementById('categoryError');
 
     function gapiLoaded() {
       gapi.load('client', initializeGapiClient);
@@ -90,7 +96,7 @@
       tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: CLIENT_ID,
         scope: SCOPES,
-        callback: '', // Will be set on sign in
+        callback: '',
       });
       gisInited = true;
       maybeEnableButtons();
@@ -133,6 +139,30 @@
       }
     };
 
+    addCategoryButton.addEventListener('click', () => {
+      const newCategory = newCategoryInput.value.trim();
+      categoryError.textContent = '';
+
+      if (!newCategory) {
+        categoryError.textContent = 'Enter a category name.';
+        return;
+      }
+
+      const exists = Array.from(categorySelect.options).some(opt => opt.text.toLowerCase() === newCategory.toLowerCase());
+
+      if (exists) {
+        categoryError.textContent = 'Category already exists.';
+        return;
+      }
+
+      const newOption = document.createElement('option');
+      newOption.text = newCategory;
+      newOption.value = newCategory;
+      categorySelect.appendChild(newOption);
+      categorySelect.value = newCategory;
+      newCategoryInput.value = '';
+    });
+
     document.getElementById('expenseForm').addEventListener('submit', async function (e) {
       e.preventDefault();
 
@@ -161,6 +191,7 @@
         statusEl.classList.remove('d-none');
 
         document.getElementById('expenseForm').reset();
+        document.getElementById('date').value = date;
       } catch (err) {
         console.error(err);
         statusEl.textContent = 'Failed to save entry.';
@@ -169,12 +200,10 @@
       }
     });
 
-    // Autofill today's date
     document.addEventListener('DOMContentLoaded', () => {
       const today = new Date().toISOString().slice(0, 10);
       document.getElementById('date').value = today;
     });
   </script>
 </body>
-
 </html>
