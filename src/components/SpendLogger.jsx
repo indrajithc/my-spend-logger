@@ -37,7 +37,7 @@ export default function SpendLogger() {
   const [status, setStatus] = useState("");
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [summary, setSummary] = useState(null);
-  const [recentEntries, setRecentEntries] = useState([]);
+  const [recentEntriesGrouped, setRecentEntriesGrouped] = useState({});
 
   useEffect(() => {
     function gapiLoaded() {
@@ -75,7 +75,6 @@ export default function SpendLogger() {
 
     gapiLoaded();
     window.gisLoaded = gisLoaded;
-
     const script1 = document.createElement("script");
     script1.src = "https://apis.google.com/js/api.js";
     script1.onload = () => gapiLoaded();
@@ -100,8 +99,17 @@ export default function SpendLogger() {
       setIsSignedIn(false);
       setStatus("Signed out");
       setSummary(null);
-      setRecentEntries([]);
+      setRecentEntriesGrouped({});
     }
+  };
+
+  const groupByDate = (entries) => {
+    const grouped = {};
+    for (const entry of entries) {
+      if (!grouped[entry.date]) grouped[entry.date] = [];
+      grouped[entry.date].push(entry);
+    }
+    return grouped;
   };
 
   const loadAndRenderSummary = async () => {
@@ -116,31 +124,31 @@ export default function SpendLogger() {
       const summaryData = {};
       let total = 0;
 
+      const entries = [];
+
       rows.forEach(([entryDate, entryCategory, entryAmount]) => {
-        if (entryDate && entryDate.startsWith(currentMonth)) {
-          const cat = normalizeCategoryName(entryCategory);
-          const amt = parseFloat(entryAmount);
+        if (!entryDate || !entryAmount) return;
+        const cat = normalizeCategoryName(entryCategory);
+        const amt = parseFloat(entryAmount);
+        if (entryDate.startsWith(currentMonth)) {
           if (!summaryData[cat]) summaryData[cat] = 0;
           summaryData[cat] += amt;
           total += amt;
         }
-      });
 
-      const recent = [...rows]
-        .reverse()
-        .slice(0, 5)
-        .map(([entryDate, entryCategory, entryAmount]) => ({
+        entries.push({
           date: entryDate,
           category: entryCategory,
-          amount: parseFloat(entryAmount),
-        }));
+          amount: amt,
+        });
+      });
 
       setSummary({ total, breakdown: summaryData });
-      setRecentEntries(recent);
+      setRecentEntriesGrouped(groupByDate(entries.reverse().slice(0, 50)));
     } catch (err) {
       console.error("Error loading summary:", err);
       setSummary(null);
-      setRecentEntries([]);
+      setRecentEntriesGrouped({});
     }
   };
 
@@ -149,7 +157,6 @@ export default function SpendLogger() {
     const selectedCategory =
       category === "other" ? normalizeCategoryName(newCategory) : category;
     if (!selectedCategory || !amount || isNaN(amount)) return;
-
     if (category === "other" && !categories.includes(selectedCategory)) {
       setCategories([...categories, selectedCategory]);
     }
@@ -164,7 +171,6 @@ export default function SpendLogger() {
           values: [[date, selectedCategory, parseFloat(amount)]],
         },
       });
-
       setStatus("Expense added successfully!");
       setAmount("");
       setNewCategory("");
@@ -177,29 +183,27 @@ export default function SpendLogger() {
   };
 
   return (
-    <div className="max-w-md mx-auto p-4 text-sm dark:text-white">
-      <div className="flex justify-between mb-4">
+    <div className="min-h-screen text-white p-4 max-w-md mx-auto">
+      <div className="flex justify-between mb-6">
         {!isSignedIn ? (
-          <button className="btn btn-primary w-full" onClick={handleAuth}>
-            Sign in with Google
+          <button className="btn btn-primary" onClick={handleAuth}>
+            Authorize
           </button>
         ) : (
-          <button className="btn btn-danger w-full" onClick={handleSignOut}>
+          <button className="btn btn-danger" onClick={handleSignOut}>
             Sign Out
           </button>
         )}
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-3">
-        <label className="block text-xs uppercase">Category</label>
+      <form onSubmit={handleSubmit} className="space-y-4">
         <select
           value={category}
           onChange={(e) => {
             setCategory(e.target.value);
-            if (e.target.value === "other") setShowNewCategoryInput(true);
-            else setShowNewCategoryInput(false);
+            setShowNewCategoryInput(e.target.value === "other");
           }}
-          className="form-select w-full rounded p-2 text-black"
+          className="form-select w-full p-2 rounded bg-gray-800 text-white"
         >
           {categories.map((cat) => (
             <option key={cat} value={cat}>
@@ -216,37 +220,40 @@ export default function SpendLogger() {
             value={newCategory}
             onChange={(e) => setNewCategory(e.target.value)}
             placeholder="New Category"
-            className="form-control w-full rounded p-2 text-black"
+            className="form-control w-full p-2 rounded bg-gray-800 text-white"
           />
         )}
 
-        <label className="block text-xs uppercase">Amount</label>
         <input
           type="number"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          placeholder="₹0.00"
-          className="form-control w-full text-2xl rounded p-3 text-center text-black"
+          placeholder="Amount (₹)"
+          className="form-control w-full p-4 text-2xl rounded bg-gray-900 text-white"
         />
 
-        <label className="block text-xs uppercase">Date</label>
         <input
           type="date"
           value={date}
           onChange={(e) => setDate(e.target.value)}
-          className="form-control w-full rounded p-2 text-black"
+          className="form-control w-full p-2 rounded bg-gray-800 text-white"
         />
 
-        <button type="submit" className="btn btn-success w-full text-lg">
+        <button
+          type="submit"
+          className="btn btn-success w-full p-3 bg-green-600 rounded text-white"
+        >
           Add Expense
         </button>
       </form>
 
-      {status && <div className="alert alert-info mt-4">{status}</div>}
+      {status && <div className="mt-4 text-sm text-green-400">{status}</div>}
 
       {summary && (
-        <div className="mt-6 p-4 border rounded bg-white dark:bg-gray-800">
-          <h3 className="font-semibold text-lg mb-2">This Month's Summary</h3>
+        <div className="mt-6 p-4 border rounded bg-gray-800">
+          <h3 className="font-semibold text-lg mb-2">
+            📊 This Month's Summary
+          </h3>
           <p className="mb-2">
             <strong>Total:</strong> ₹{summary.total.toFixed(2)}
           </p>
@@ -260,20 +267,28 @@ export default function SpendLogger() {
         </div>
       )}
 
-      {recentEntries.length > 0 && (
-        <div className="mt-6 p-4 border rounded bg-white dark:bg-gray-800">
-          <h3 className="font-semibold text-lg mb-2">Recent Entries</h3>
-          <ul className="space-y-1">
-            {recentEntries.map((entry, idx) => (
-              <li key={idx} className="flex justify-between text-sm">
-                <span>{entry.date}</span>
-                <span>
-                  {displayCategoryName(normalizeCategoryName(entry.category))}
-                </span>
-                <span>₹{entry.amount.toFixed(2)}</span>
-              </li>
-            ))}
-          </ul>
+      {Object.keys(recentEntriesGrouped).length > 0 && (
+        <div className="mt-6 p-4 border rounded bg-gray-800">
+          <h3 className="font-semibold text-lg mb-3">🧾 Recent Entries</h3>
+          {Object.entries(recentEntriesGrouped).map(([groupDate, entries]) => (
+            <div key={groupDate} className="mb-4">
+              <h4 className="font-medium text-sm text-gray-400 mb-1">
+                📅 {groupDate}
+              </h4>
+              <ul className="space-y-1 pl-4 text-sm">
+                {entries.map((entry, idx) => (
+                  <li key={idx} className="flex justify-between">
+                    <span>
+                      {displayCategoryName(
+                        normalizeCategoryName(entry.category)
+                      )}
+                    </span>
+                    <span>₹{entry.amount.toFixed(2)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
       )}
     </div>
