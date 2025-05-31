@@ -104,7 +104,14 @@
 
     function maybeEnableButtons() {
       if (gapiInited && gisInited) {
-        authorizeButton.style.display = 'inline-block';
+        const savedToken = localStorage.getItem('gapi_token');
+        if (savedToken) {
+          gapi.client.setToken(JSON.parse(savedToken));
+          authorizeButton.textContent = 'Refresh';
+          signoutButton.style.display = 'inline-block';
+        } else {
+          authorizeButton.style.display = 'inline-block';
+        }
       }
     }
 
@@ -114,6 +121,8 @@
           console.error(resp);
           return;
         }
+        const token = gapi.client.getToken();
+        localStorage.setItem('gapi_token', JSON.stringify(token));
         authorizeButton.textContent = 'Refresh';
         signoutButton.style.display = 'inline-block';
         statusEl.className = 'alert alert-success';
@@ -133,6 +142,7 @@
       if (token) {
         google.accounts.oauth2.revoke(token.access_token);
         gapi.client.setToken('');
+        localStorage.removeItem('gapi_token');
         statusEl.textContent = 'Signed out';
         signoutButton.style.display = 'none';
         authorizeButton.textContent = 'Authorize';
